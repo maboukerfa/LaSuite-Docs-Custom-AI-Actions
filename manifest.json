@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Docs AI System Prompt",
+  "version": "0.1.0",
+  "description": "Reroute /ai-transform requests on docs.numerique.gouv.fr to /ai-proxy with a custom system prompt.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://docs.numerique.gouv.fr/*"
+  ],
+  "action": {
+    "default_title": "Docs AI System Prompt",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://docs.numerique.gouv.fr/*"
+
+      ],
+      "js": ["bridge.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    },
+    {
+      "matches": [
+        "https://docs.numerique.gouv.fr/*"
+      ],
+      "js": ["inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
+}
