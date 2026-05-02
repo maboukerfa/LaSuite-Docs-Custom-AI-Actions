@@ -249,15 +249,19 @@
   }
 
   function syncCustomItems() {
+    syncBlockNoteMenu();
+    syncLegacyDropdown();
+  }
+
+  function syncBlockNoteMenu() {
     const menu = document.getElementById('ai-suggestion-menu');
     if (!menu) return;
     if (!enabled || customActions.length === 0) {
-      // remove our items if intercept got disabled or list emptied
       menu.querySelectorAll(`.${ACTION_CLASS}`).forEach((n) => n.remove());
       return;
     }
     const existing = findExistingItem(menu);
-    if (!existing) return; // wait for the menu to populate its own items first
+    if (!existing) return;
     const present = new Set(
       Array.from(menu.querySelectorAll(`.${ACTION_CLASS}`)).map((n) =>
         n.getAttribute(ACTION_INDEX_ATTR)
@@ -267,13 +271,138 @@
       if (present.has(action.id)) continue;
       injectAction(menu, existing, action);
     }
-    // remove stale ones (deleted/renamed in popup)
     const wantedIds = new Set(customActions.map((a) => a.id));
-    menu
-      .querySelectorAll(`.${ACTION_CLASS}`)
-      .forEach((n) => {
-        if (!wantedIds.has(n.getAttribute(ACTION_INDEX_ATTR))) n.remove();
-      });
+    menu.querySelectorAll(`.${ACTION_CLASS}`).forEach((n) => {
+      if (!wantedIds.has(n.getAttribute(ACTION_INDEX_ATTR))) n.remove();
+    });
+  }
+
+  // ---- legacy "Actions IA" dropdown (AIButtonMIT) --------------------------
+  // The class `--docs--ai-actions-menu` starts with `--`, which CSS reserves
+  // for custom properties — use [class~="..."] attribute matching to dodge
+  // any escaping issues. Same for the language sub-trigger we want to skip.
+  const LEGACY_ACTION_CLASS = 'dap-custom-legacy-action';
+  const LEGACY_DROPDOWN_SEL = '[class~="--docs--ai-actions-menu"]';
+  const LEGACY_TRANSLATE_TRIGGER_SEL = '[class~="--docs--ai-translate-menu-trigger"]';
+  let legacyLogged = false;
+
+  function findLegacyDropdown() {
+    return document.querySelector(LEGACY_DROPDOWN_SEL);
+  }
+
+  function findLegacyItem(dropdown) {
+    // Action items are rendered as Mantine Menu.Item without a custom class
+    // (only mantine-Menu-item). The language sub-trigger also has that class
+    // plus --docs--ai-translate-menu-trigger — skip it. Try several
+    // candidate selectors for resilience.
+    const all = dropdown.querySelectorAll(
+      '[class~="mantine-Menu-item"], [class*="Menu-item"], [role="menuitem"], button'
+    );
+    for (const c of all) {
+      if (c.classList.contains(LEGACY_ACTION_CLASS)) continue;
+      if (c.matches(LEGACY_TRANSLATE_TRIGGER_SEL)) continue;
+      if (c.querySelector(LEGACY_TRANSLATE_TRIGGER_SEL)) continue;
+      // skip elements that are children of a menu-item we'll find separately
+      if (c.closest(`.${LEGACY_ACTION_CLASS}`)) continue;
+      return c;
+    }
+    return null;
+  }
+
+  function injectLegacyAction(dropdown, template, action) {
+    const node = template.cloneNode(true);
+    node.classList.add(LEGACY_ACTION_CLASS);
+    node.setAttribute(ACTION_INDEX_ATTR, action.id);
+    // overwrite icon area with star marker
+    const iconHolder =
+      node.querySelector('.mantine-Menu-itemSection[data-position="left"]') ||
+      node.querySelector('[data-position="left"]') ||
+      node.querySelector('[class*="itemSection"]');
+    if (iconHolder) iconHolder.textContent = '★';
+    // overwrite label
+    const label =
+      node.querySelector('.mantine-Menu-itemLabel') ||
+      node.querySelector('[class*="itemLabel"]') ||
+      node.querySelector('[class*="Label"]');
+    if (label) {
+      label.textContent = action.name;
+    } else {
+      // fallback: rewrite the first text node found
+      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+      const first = walker.nextNode();
+      if (first) first.nodeValue = action.name;
+    }
+    // strip React listeners by re-cloning, then attach our own
+    const fresh = node.cloneNode(true);
+    fresh.addEventListener(
+      'click',
+      (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        runCustomLegacyAction(action);
+      },
+      true
+    );
+    fresh.addEventListener(
+      'mousedown',
+      (ev) => {
+        // Mantine often closes on outside-click via mousedown — keep it open
+        ev.stopPropagation();
+      },
+      true
+    );
+    dropdown.appendChild(fresh);
+  }
+
+  function runCustomLegacyAction(action) {
+    const dropdown = findLegacyDropdown();
+    if (!dropdown) {
+      console.warn(TAG, 'legacy dropdown vanished before delegate');
+      return;
+    }
+    const target = findLegacyItem(dropdown);
+    if (!target) {
+      console.warn(TAG, 'no legacy item to delegate to');
+      return;
+    }
+    pendingActionOverride = action.prompt || '';
+    console.log(TAG, 'custom legacy action →', action.name, '(via', target.textContent.trim(), ')');
+    // dispatch a full pointer + click sequence so React's synthetic onClick fires
+    const opts = { bubbles: true, cancelable: true, view: window, button: 0 };
+    target.dispatchEvent(new MouseEvent('mousedown', opts));
+    target.dispatchEvent(new MouseEvent('mouseup', opts));
+    target.dispatchEvent(new MouseEvent('click', opts));
+  }
+
+  function syncLegacyDropdown() {
+    const dropdown = findLegacyDropdown();
+    if (!dropdown) return;
+    if (!legacyLogged) {
+      console.log(TAG, 'legacy dropdown detected:', dropdown);
+      legacyLogged = true;
+    }
+    if (customActions.length === 0) {
+      dropdown.querySelectorAll(`.${LEGACY_ACTION_CLASS}`).forEach((n) => n.remove());
+      return;
+    }
+    const template = findLegacyItem(dropdown);
+    if (!template) {
+      console.warn(TAG, 'no legacy template item yet, will retry on next mutation');
+      return;
+    }
+    const present = new Set(
+      Array.from(dropdown.querySelectorAll(`.${LEGACY_ACTION_CLASS}`)).map((n) =>
+        n.getAttribute(ACTION_INDEX_ATTR)
+      )
+    );
+    for (const action of customActions) {
+      if (present.has(action.id)) continue;
+      injectLegacyAction(dropdown, template, action);
+    }
+    const wantedIds = new Set(customActions.map((a) => a.id));
+    dropdown.querySelectorAll(`.${LEGACY_ACTION_CLASS}`).forEach((n) => {
+      if (!wantedIds.has(n.getAttribute(ACTION_INDEX_ATTR))) n.remove();
+    });
   }
 
   // run the action: prime override, fill input, dispatch Enter so BlockNote's
@@ -374,8 +503,13 @@
       return origFetch(input, init);
     }
 
-    // 2) /ai-transform/ → /ai-proxy/ rewrite (default global system prompt)
-    if (!enabled || !url.includes('/ai-transform/') || !init || !init.body) {
+    // 2) /ai-transform/ → /ai-proxy/ rewrite. Runs when either the global
+    //    intercept is enabled OR a legacy custom-action override is pending.
+    //    The override wins for the prompt and bypasses the enabled gate.
+    const isTransform =
+      url.includes('/ai-transform/') && init && typeof init.body === 'string';
+    const useOverride = pendingActionOverride !== null && isTransform;
+    if (!isTransform || (!enabled && !useOverride)) {
       return origFetch(input, init);
     }
 
@@ -388,6 +522,14 @@
     const userText = parsed && parsed.text;
     if (typeof userText !== 'string') return origFetch(input, init);
 
+    const promptForRequest = useOverride
+      ? pendingActionOverride
+      : systemPrompt || 'You are a helpful assistant.';
+    if (useOverride) {
+      pendingActionOverride = null;
+      console.log(TAG, '/ai-transform/ using custom-action override prompt');
+    }
+
     const newUrl = url.replace('/ai-transform/', '/ai-proxy/');
     const newBody = JSON.stringify({
       trigger: 'submit-message',
@@ -396,7 +538,7 @@
         {
           id: crypto.randomUUID(),
           role: 'system',
-          parts: [{ type: 'text', text: systemPrompt || 'You are a helpful assistant.' }],
+          parts: [{ type: 'text', text: promptForRequest }],
         },
         {
           id: crypto.randomUUID(),
