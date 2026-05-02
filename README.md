@@ -6,6 +6,8 @@ action is a name + custom system prompt, injected into both the BlockNote
 "Ask AI" menu and the legacy "Actions IA" toolbar dropdown. Click one to apply
 its prompt to the current selection.
 
+<img width="800" height="389" alt="custom_commands" src="https://github.com/user-attachments/assets/78715aa2-617e-414e-bd4b-ccec8eb5d76b" />
+
 ## Install (Chrome / Edge / Brave)
 
 1. Clone this repo.
@@ -67,7 +69,3 @@ when one of your custom actions was just clicked.
   so its loading spinner briefly appears on the wrong row — the request
   itself uses your custom prompt.
 - Tested against la suite docs `v4.8.6`. Earlier or later versions may differ.
-
-## License
-
-MIT.
