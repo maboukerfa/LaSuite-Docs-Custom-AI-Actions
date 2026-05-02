@@ -1,5 +1,3 @@
-const promptEl = document.getElementById('prompt');
-const enabledEl = document.getElementById('enabled');
 const reasoningEl = document.getElementById('showReasoning');
 const statusEl = document.getElementById('status');
 const saveBtn = document.getElementById('save');
@@ -62,24 +60,17 @@ function renderActions() {
 addBtn.addEventListener('click', () => {
   actions.push({ id: uid(), name: '', prompt: '' });
   renderActions();
-  // focus the new name field
   const last = listEl.querySelector('.action-row:last-child .action-name');
   if (last) last.focus();
 });
 
-chrome.storage.local.get(
-  ['systemPrompt', 'enabled', 'showReasoning', 'customActions'],
-  (s) => {
-    promptEl.value = s.systemPrompt || '';
-    enabledEl.checked = !!s.enabled;
-    reasoningEl.checked = s.showReasoning !== false; // default on
-    actions = Array.isArray(s.customActions) ? s.customActions.map((a) => ({ ...a })) : [];
-    renderActions();
-  }
-);
+chrome.storage.local.get(['showReasoning', 'customActions'], (s) => {
+  reasoningEl.checked = s.showReasoning !== false; // default on
+  actions = Array.isArray(s.customActions) ? s.customActions.map((a) => ({ ...a })) : [];
+  renderActions();
+});
 
 saveBtn.addEventListener('click', () => {
-  // strip out empty rows on save
   const cleaned = actions
     .filter((a) => (a.name && a.name.trim()) || (a.prompt && a.prompt.trim()))
     .map((a) => ({
@@ -91,8 +82,6 @@ saveBtn.addEventListener('click', () => {
   renderActions();
   chrome.storage.local.set(
     {
-      systemPrompt: promptEl.value,
-      enabled: enabledEl.checked,
       showReasoning: reasoningEl.checked,
       customActions: cleaned,
     },
@@ -101,19 +90,13 @@ saveBtn.addEventListener('click', () => {
 });
 
 resetBtn.addEventListener('click', () => {
-  promptEl.value = '';
-  enabledEl.checked = false;
   reasoningEl.checked = true;
   actions = [];
   renderActions();
   chrome.storage.local.set(
-    { systemPrompt: '', enabled: false, showReasoning: true, customActions: [] },
+    { showReasoning: true, customActions: [] },
     () => flash('Reset')
   );
-});
-
-enabledEl.addEventListener('change', () => {
-  chrome.storage.local.set({ enabled: enabledEl.checked });
 });
 
 reasoningEl.addEventListener('change', () => {

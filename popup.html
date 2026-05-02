@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Docs AI System Prompt</title>
+    <title>Docs AI Custom Actions</title>
     <style>
       body {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -27,10 +27,6 @@
         border: 1px solid #ccc;
         border-radius: 6px;
         box-sizing: border-box;
-      }
-      textarea {
-        min-height: 100px;
-        resize: vertical;
       }
       .row {
         display: flex;
@@ -64,11 +60,6 @@
         color: #777;
         margin-top: 6px;
         line-height: 1.4;
-      }
-      .section {
-        margin-top: 14px;
-        padding-top: 12px;
-        border-top: 1px solid #ddd;
       }
       .section-title {
         font-weight: 600;
@@ -124,16 +115,15 @@
   </head>
   <body>
     <label>
-      <input type="checkbox" id="enabled" />
-      Intercept AI requests on this site
-    </label>
-
-    <label>
       <input type="checkbox" id="showReasoning" />
       Show reasoning tip (floating panel)
     </label>
 
-    <textarea id="prompt" placeholder="You are a helpful assistant..."></textarea>
+    <div class="section-title">Custom actions in AI menu</div>
+    <div id="actions-list"></div>
+    <div class="row">
+      <button id="addAction" type="button">+ Add action</button>
+    </div>
 
     <div class="row">
       <button id="reset">Reset</button>
@@ -143,21 +133,9 @@
     <div class="status" id="status"></div>
 
     <div class="hint">
-      When enabled, calls to <code>/ai-transform/</code> are rerouted to <code>/ai-proxy/</code>
-      with the system prompt above. Custom actions below are injected into the AI menu and run
-      through <code>/ai-proxy/</code> with their own system prompt.
-    </div>
-
-    <div class="section">
-      <div class="section-title">Custom actions in AI menu</div>
-      <div id="actions-list"></div>
-      <div class="row">
-        <button id="addAction" type="button">+ Add action</button>
-      </div>
-      <div class="hint">
-        Each action appears in the docs AI menu (★ prefix). Clicking one fills the AI input with
-        the action name and submits, applying its system prompt to the current selection.
-      </div>
+      Each action appears with a ★ prefix in both the BlockNote "Ask AI" menu and the legacy
+      "Actions IA" toolbar dropdown. Clicking one applies its system prompt to the current
+      selection.
     </div>
 
     <script src="popup.js"></script>

@@ -1,24 +1,19 @@
 (() => {
   const TAG = '[docs-ai-prompt]';
-  let systemPrompt = '';
-  let enabled = false;
   let showReasoning = true;
   let customActions = []; // [{id, name, prompt}]
 
-  // one-shot: when set, the next /ai-proxy/ request gets this system prompt
-  // prepended to its messages array
+  // one-shot: when set, the next /ai-proxy/ or /ai-transform/ request gets
+  // this system prompt prepended (or used as) the system message
   let pendingActionOverride = null;
 
   window.addEventListener('message', (e) => {
     if (e.source !== window) return;
     const data = e.data;
     if (!data || data.__docsAiPrompt !== true) return;
-    if (typeof data.systemPrompt === 'string') systemPrompt = data.systemPrompt;
-    if (typeof data.enabled === 'boolean') enabled = data.enabled;
     if (typeof data.showReasoning === 'boolean') showReasoning = data.showReasoning;
     if (Array.isArray(data.customActions)) {
       customActions = data.customActions.filter((a) => a && a.name);
-      // re-sync menu on next mutation tick
       syncCustomItems();
     }
   });
@@ -256,7 +251,7 @@
   function syncBlockNoteMenu() {
     const menu = document.getElementById('ai-suggestion-menu');
     if (!menu) return;
-    if (!enabled || customActions.length === 0) {
+    if (customActions.length === 0) {
       menu.querySelectorAll(`.${ACTION_CLASS}`).forEach((n) => n.remove());
       return;
     }
@@ -503,13 +498,12 @@
       return origFetch(input, init);
     }
 
-    // 2) /ai-transform/ → /ai-proxy/ rewrite. Runs when either the global
-    //    intercept is enabled OR a legacy custom-action override is pending.
-    //    The override wins for the prompt and bypasses the enabled gate.
+    // 2) /ai-transform/ → /ai-proxy/ rewrite, only when a legacy custom-action
+    //    override is pending. Without an override, the request flows through
+    //    untouched.
     const isTransform =
       url.includes('/ai-transform/') && init && typeof init.body === 'string';
-    const useOverride = pendingActionOverride !== null && isTransform;
-    if (!isTransform || (!enabled && !useOverride)) {
+    if (!isTransform || pendingActionOverride === null) {
       return origFetch(input, init);
     }
 
@@ -522,13 +516,9 @@
     const userText = parsed && parsed.text;
     if (typeof userText !== 'string') return origFetch(input, init);
 
-    const promptForRequest = useOverride
-      ? pendingActionOverride
-      : systemPrompt || 'You are a helpful assistant.';
-    if (useOverride) {
-      pendingActionOverride = null;
-      console.log(TAG, '/ai-transform/ using custom-action override prompt');
-    }
+    const promptForRequest = pendingActionOverride;
+    pendingActionOverride = null;
+    console.log(TAG, '/ai-transform/ using custom-action override prompt');
 
     const newUrl = url.replace('/ai-transform/', '/ai-proxy/');
     const newBody = JSON.stringify({
