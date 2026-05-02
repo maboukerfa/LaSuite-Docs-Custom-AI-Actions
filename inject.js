@@ -3,6 +3,11 @@
   let systemPrompt = '';
   let enabled = false;
   let showReasoning = true;
+  let customActions = []; // [{id, name, prompt}]
+
+  // one-shot: when set, the next /ai-proxy/ request gets this system prompt
+  // prepended to its messages array
+  let pendingActionOverride = null;
 
   window.addEventListener('message', (e) => {
     if (e.source !== window) return;
@@ -11,6 +16,11 @@
     if (typeof data.systemPrompt === 'string') systemPrompt = data.systemPrompt;
     if (typeof data.enabled === 'boolean') enabled = data.enabled;
     if (typeof data.showReasoning === 'boolean') showReasoning = data.showReasoning;
+    if (Array.isArray(data.customActions)) {
+      customActions = data.customActions.filter((a) => a && a.name);
+      // re-sync menu on next mutation tick
+      syncCustomItems();
+    }
   });
 
   // ---- minimal markdown → HTML ---------------------------------------------
@@ -19,19 +29,15 @@
 
   function md(text) {
     let t = escapeHtml(text);
-    // fenced code blocks ```lang\n...\n```
     t = t.replace(/```(\w+)?\n([\s\S]*?)```/g, (_, _lang, code) =>
       `<pre><code>${code.replace(/\n$/, '')}</code></pre>`
     );
-    // headings
     t = t.replace(/^### (.+)$/gm, '<h3>$1</h3>');
     t = t.replace(/^## (.+)$/gm, '<h2>$1</h2>');
     t = t.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-    // bold / italic / inline code
     t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     t = t.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
     t = t.replace(/`([^`\n]+)`/g, '<code>$1</code>');
-    // unordered list lines
     t = t.replace(/(?:^|\n)((?:- .+(?:\n|$))+)/g, (m, block) => {
       const items = block
         .trim()
@@ -40,7 +46,6 @@
         .join('');
       return `\n<ul>${items}</ul>`;
     });
-    // paragraphs
     t = t
       .split(/\n{2,}/)
       .map((para) => {
@@ -164,7 +169,6 @@
   function showTip(reasoning, streaming) {
     if (!showReasoning) return;
     if (!document.body) {
-      // page may not be fully ready at document_start, defer
       window.addEventListener('DOMContentLoaded', () => showTip(reasoning, streaming), { once: true });
       return;
     }
@@ -175,12 +179,202 @@
     tipBodyEl.classList.toggle('dap-streaming', !!streaming);
   }
 
+  // ---- custom-action injection into BlockNote AI menu ----------------------
+  // Strategy: find #ai-suggestion-menu, clone an existing item per custom action
+  // so styling matches automatically. Tag each clone so we don't double-inject.
+  // The menu re-renders as the user types; observer re-injects when wiped.
+
+  const ACTION_CLASS = 'dap-custom-action';
+  const ACTION_INDEX_ATTR = 'data-dap-action-id';
+
+  function findExistingItem(menu) {
+    return (
+      menu.querySelector(`.bn-suggestion-menu-item-small:not(.${ACTION_CLASS})`) ||
+      menu.querySelector(`[role="menuitem"]:not(.${ACTION_CLASS})`) ||
+      menu.querySelector(`.mantine-Menu-item:not(.${ACTION_CLASS})`) ||
+      null
+    );
+  }
+
+  function injectAction(menu, template, action) {
+    const node = template.cloneNode(true);
+    node.classList.add(ACTION_CLASS);
+    node.setAttribute(ACTION_INDEX_ATTR, action.id);
+    // remove icon img/svg if present so our marker doesn't clash with the cloned glyph
+    const iconHolder = node.querySelector('[data-position="left"]');
+    if (iconHolder) iconHolder.textContent = '★';
+    // replace title text — try common BlockNote/Mantine class names, fall back to first text node
+    const title =
+      node.querySelector('.bn-mt-suggestion-menu-item-title') ||
+      node.querySelector('.mantine-Text-root') ||
+      node.querySelector('[class*="title" i]');
+    if (title) {
+      title.textContent = action.name;
+    } else {
+      // fallback: replace all text content with the action name
+      // (preserves nested element structure but rewrites visible text)
+      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+      let first = walker.nextNode();
+      if (first) first.nodeValue = action.name;
+      while (walker.nextNode()) walker.currentNode.nodeValue = '';
+    }
+    // replace subtitle with prompt preview
+    const subtitle =
+      node.querySelector('.bn-mt-suggestion-menu-item-subtitle') ||
+      node.querySelector('[class*="subtitle" i]');
+    if (subtitle) {
+      const preview = (action.prompt || '').replace(/\s+/g, ' ').slice(0, 60);
+      subtitle.textContent = preview;
+    }
+    // strip every existing event listener by replacing with a fresh clone
+    const fresh = node.cloneNode(true);
+    fresh.addEventListener(
+      'click',
+      (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        runCustomAction(action);
+      },
+      true
+    );
+    fresh.addEventListener(
+      'mousedown',
+      (ev) => {
+        // some menus close on mousedown outside the input — keep focus
+        ev.preventDefault();
+      },
+      true
+    );
+    menu.appendChild(fresh);
+  }
+
+  function syncCustomItems() {
+    const menu = document.getElementById('ai-suggestion-menu');
+    if (!menu) return;
+    if (!enabled || customActions.length === 0) {
+      // remove our items if intercept got disabled or list emptied
+      menu.querySelectorAll(`.${ACTION_CLASS}`).forEach((n) => n.remove());
+      return;
+    }
+    const existing = findExistingItem(menu);
+    if (!existing) return; // wait for the menu to populate its own items first
+    const present = new Set(
+      Array.from(menu.querySelectorAll(`.${ACTION_CLASS}`)).map((n) =>
+        n.getAttribute(ACTION_INDEX_ATTR)
+      )
+    );
+    for (const action of customActions) {
+      if (present.has(action.id)) continue;
+      injectAction(menu, existing, action);
+    }
+    // remove stale ones (deleted/renamed in popup)
+    const wantedIds = new Set(customActions.map((a) => a.id));
+    menu
+      .querySelectorAll(`.${ACTION_CLASS}`)
+      .forEach((n) => {
+        if (!wantedIds.has(n.getAttribute(ACTION_INDEX_ATTR))) n.remove();
+      });
+  }
+
+  // run the action: prime override, fill input, dispatch Enter so BlockNote's
+  // own onManualPromptSubmit pipeline runs (which calls invokeAI → /ai-proxy/
+  // → applyDocumentOperations to actually edit the doc).
+  function runCustomAction(action) {
+    const input = document.querySelector('input[name="ai-prompt"]');
+    if (!input) {
+      console.warn(TAG, 'no ai-prompt input found');
+      return;
+    }
+    pendingActionOverride = action.prompt || '';
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value'
+    ).set;
+    setter.call(input, action.name || 'Apply.');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    // submit
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        keyCode: 13,
+        which: 13,
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    input.dispatchEvent(
+      new KeyboardEvent('keypress', {
+        key: 'Enter',
+        code: 'Enter',
+        keyCode: 13,
+        which: 13,
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    input.dispatchEvent(
+      new KeyboardEvent('keyup', {
+        key: 'Enter',
+        code: 'Enter',
+        keyCode: 13,
+        which: 13,
+        bubbles: true,
+      })
+    );
+  }
+
+  // observe document for the suggestion menu mounting/re-rendering
+  const docObserver = new MutationObserver(() => {
+    syncCustomItems();
+  });
+  if (document.documentElement) {
+    docObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+    });
+  } else {
+    window.addEventListener('DOMContentLoaded', () => {
+      docObserver.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+      });
+    });
+  }
+
   // ---- patched fetch -------------------------------------------------------
   const origFetch = window.fetch;
 
   window.fetch = async (input, init = {}) => {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
 
+    // 1) /ai-proxy/ override for custom actions — prepend system prompt and pass through
+    if (
+      pendingActionOverride !== null &&
+      url.includes('/ai-proxy/') &&
+      init &&
+      typeof init.body === 'string'
+    ) {
+      const override = pendingActionOverride;
+      pendingActionOverride = null;
+      try {
+        const body = JSON.parse(init.body);
+        if (Array.isArray(body.messages)) {
+          body.messages.unshift({
+            id: crypto.randomUUID(),
+            role: 'system',
+            parts: [{ type: 'text', text: override }],
+          });
+          init = { ...init, body: JSON.stringify(body) };
+          console.log(TAG, 'custom-action system prompt injected for /ai-proxy/');
+        }
+      } catch (err) {
+        console.warn(TAG, 'failed to inject custom-action prompt:', err);
+      }
+      return origFetch(input, init);
+    }
+
+    // 2) /ai-transform/ → /ai-proxy/ rewrite (default global system prompt)
     if (!enabled || !url.includes('/ai-transform/') || !init || !init.body) {
       return origFetch(input, init);
     }
@@ -251,7 +445,6 @@
           }
         } catch {}
       }
-      // throttle repaints to ~10fps
       const now = Date.now();
       if (touchedReasoning && now - lastPaint > 100) {
         showTip(reasoning, true);

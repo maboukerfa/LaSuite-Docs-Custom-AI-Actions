@@ -1,5 +1,5 @@
 (() => {
-  const KEYS = ['systemPrompt', 'enabled', 'showReasoning'];
+  const KEYS = ['systemPrompt', 'enabled', 'showReasoning', 'customActions'];
 
   const post = (state) => {
     window.postMessage(
@@ -8,6 +8,7 @@
         systemPrompt: state.systemPrompt || '',
         enabled: !!state.enabled,
         showReasoning: state.showReasoning !== false, // default true
+        customActions: Array.isArray(state.customActions) ? state.customActions : [],
       },
       '*'
     );
