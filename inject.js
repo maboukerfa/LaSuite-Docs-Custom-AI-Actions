@@ -240,7 +240,22 @@
       },
       true
     );
-    menu.appendChild(fresh);
+    insertAtTop(menu, fresh);
+  }
+
+  // insert `node` at the top of `container`, but after any sibling that is
+  // already one of our custom items so successive calls preserve order
+  function insertAtTop(container, node) {
+    let anchor = container.firstElementChild;
+    while (
+      anchor &&
+      (anchor.classList.contains(ACTION_CLASS) ||
+        anchor.classList.contains(LEGACY_ACTION_CLASS))
+    ) {
+      anchor = anchor.nextElementSibling;
+    }
+    if (anchor) container.insertBefore(node, anchor);
+    else container.appendChild(node);
   }
 
   function syncCustomItems() {
@@ -346,7 +361,7 @@
       },
       true
     );
-    dropdown.appendChild(fresh);
+    insertAtTop(dropdown, fresh);
   }
 
   function runCustomLegacyAction(action) {
