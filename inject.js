@@ -502,7 +502,7 @@
           body.messages.unshift({
             id: crypto.randomUUID(),
             role: 'system',
-            parts: [{ type: 'text', text: override }],
+            parts: [{ type: 'text', text: override + '\n\nReturn the content directly without wrapping it in code blocks or markdown delimiters.' }],
           });
           init = { ...init, body: JSON.stringify(body) };
           console.log(TAG, 'custom-action system prompt injected for /ai-proxy/');
@@ -543,7 +543,7 @@
         {
           id: crypto.randomUUID(),
           role: 'system',
-          parts: [{ type: 'text', text: promptForRequest }],
+          parts: [{ type: 'text', text: promptForRequest + '\n\nReturn the content directly without wrapping it in code blocks or markdown delimiters.' }],
         },
         {
           id: crypto.randomUUID(),
